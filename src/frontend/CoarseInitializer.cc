@@ -48,6 +48,7 @@ namespace ldso {
         couplingWeight = 1;
 
         if (!snapped) {
+            // 设置translation为0
             thisToNext.translation().setZero();
             for (int lvl = 0; lvl < pyrLevelsUsed; lvl++) {
                 int npts = numPoints[lvl];
@@ -63,7 +64,9 @@ namespace ldso {
         SE3 refToNew_current = thisToNext;
         AffLight refToNew_aff_current = thisToNext_aff;
 
+        // 如果曝光实践都是大于0的
         if (firstFrame->ab_exposure > 0 && newFrame->ab_exposure > 0)
+            // 优化曝光参数
             refToNew_aff_current = AffLight(logf(newFrame->ab_exposure / firstFrame->ab_exposure),
                                             0); // coarse approximation.
 
@@ -73,12 +76,18 @@ namespace ldso {
 
 
             if (lvl < pyrLevelsUsed - 1)
+                // 如果不在金字塔的顶层，则进行参数的向下传播
                 propagateDown(lvl + 1);
 
             Mat88f H, Hsc;
             Vec8f b, bsc;
+            // 这个resetPoints的意义待定
             resetPoints(lvl);
+
+            // 
             Vec3f resOld = calcResAndGS(lvl, H, b, Hsc, bsc, refToNew_current, refToNew_aff_current, false);
+
+            // 
             applyStep(lvl);
 
             float lambda = 0.1;
@@ -622,80 +631,82 @@ namespace ldso {
         Pnt *pts = points[lvl];
         int npts = numPoints[lvl];
         for (int i = 0; i < npts; i++) {
-            pts[i].energy.setZero();
+            pts[i].energy.setzero();
             pts[i].idepth_new = pts[i].idepth;
 
 
-            if (lvl == pyrLevelsUsed - 1 && !pts[i].isGood) {
+            if (lvl == pyrlevelsused - 1 && !pts[i].isgood) {
                 float snd = 0, sn = 0;
                 for (int n = 0; n < 10; n++) {
-                    if (pts[i].neighbours[n] == -1 || !pts[pts[i].neighbours[n]].isGood) continue;
-                    snd += pts[pts[i].neighbours[n]].iR;
+                    // 看一下相邻点的good比例
+                    if (pts[i].neighbours[n] == -1 || !pts[pts[i].neighbours[n]].isgood) continue;
+                    snd += pts[pts[i].neighbours[n]].ir;
                     sn += 1;
                 }
-
+                // 有一个是good就行
                 if (sn > 0) {
-                    pts[i].isGood = true;
-                    pts[i].iR = pts[i].idepth = pts[i].idepth_new = snd / sn;
+                    pts[i].isgood = true;
+                    // 初始化该点的深度
+                    pts[i].ir = pts[i].idepth = pts[i].idepth_new = snd / sn;
                 }
             }
         }
     }
 
-    void CoarseInitializer::doStep(int lvl, float lambda, Vec8f inc) {
+    void coarseinitializer::dostep(int lvl, float lambda, vec8f inc) {
 
-        const float maxPixelStep = 0.25;
-        const float idMaxStep = 1e10;
-        Pnt *pts = points[lvl];
-        int npts = numPoints[lvl];
+        const float maxpixelstep = 0.25;
+        const float idmaxstep = 1e10;
+        pnt *pts = points[lvl];
+        int npts = numpoints[lvl];
         for (int i = 0; i < npts; i++) {
-            if (!pts[i].isGood) continue;
+            if (!pts[i].isgood) continue;
 
 
-            float b = JbBuffer[i][8] + JbBuffer[i].head<8>().dot(inc);
-            float step = -b * JbBuffer[i][9] / (1 + lambda);
+            float b = jbbuffer[i][8] + jbbuffer[i].head<8>().dot(inc);
+            float step = -b * jbbuffer[i][9] / (1 + lambda);
 
 
-            float maxstep = maxPixelStep * pts[i].maxstep;
-            if (maxstep > idMaxStep) maxstep = idMaxStep;
+            float maxstep = maxpixelstep * pts[i].maxstep;
+            if (maxstep > idmaxstep) maxstep = idmaxstep;
 
             if (step > maxstep) step = maxstep;
             if (step < -maxstep) step = -maxstep;
 
-            float newIdepth = pts[i].idepth + step;
-            if (newIdepth < 1e-3) newIdepth = 1e-3;
-            if (newIdepth > 50) newIdepth = 50;
-            pts[i].idepth_new = newIdepth;
+            float newidepth = pts[i].idepth + step;
+            if (newidepth < 1e-3) newidepth = 1e-3;
+            if (newidepth > 50) newidepth = 50;
+            pts[i].idepth_new = newidepth;
         }
 
     }
 
-    void CoarseInitializer::applyStep(int lvl) {
-        Pnt *pts = points[lvl];
-        int npts = numPoints[lvl];
+    void coarseinitializer::applystep(int lvl) {
+        pnt *pts = points[lvl];
+        int npts = numpoints[lvl];
         for (int i = 0; i < npts; i++) {
-            if (!pts[i].isGood) {
-                pts[i].idepth = pts[i].idepth_new = pts[i].iR;
+            if (!pts[i].isgood) {
+                pts[i].idepth = pts[i].idepth_new = pts[i].ir;
                 continue;
             }
             pts[i].energy = pts[i].energy_new;
-            pts[i].isGood = pts[i].isGood_new;
+            pts[i].isgood = pts[i].isgood_new;
             pts[i].idepth = pts[i].idepth_new;
-            pts[i].lastHessian = pts[i].lastHessian_new;
+            pts[i].lasthessian = pts[i].lasthessian_new;
         }
-        std::swap<Vec10f *>(JbBuffer, JbBuffer_new);
+        std::swap<vec10f *>(jbbuffer, jbbuffer_new);
     }
 
-    void CoarseInitializer::makeK(shared_ptr<CalibHessian> HCalib) {
-        w[0] = wG[0];
-        h[0] = hG[0];
+    void coarseinitializer::makek(shared_ptr<calibhessian> hcalib) {
+        w[0] = wg[0];
+        h[0] = hg[0];
 
-        fx[0] = HCalib->fxl();
-        fy[0] = HCalib->fyl();
-        cx[0] = HCalib->cxl();
-        cy[0] = HCalib->cyl();
+        fx[0] = hcalib->fxl();
+        fy[0] = hcalib->fyl();
+        cx[0] = hcalib->cxl();
+        cy[0] = hcalib->cyl();
 
-        for (int level = 1; level < pyrLevelsUsed; ++level) {
+        for (int level = 1; level < pyrlevelsused; ++level) {
             w[level] = w[0] >> level;
             h[level] = h[0] >> level;
             fx[level] = fx[level - 1] * 0.5;
@@ -704,81 +715,82 @@ namespace ldso {
             cy[level] = (cy[0] + 0.5) / ((int) 1 << level) - 0.5;
         }
 
-        for (int level = 0; level < pyrLevelsUsed; ++level) {
-            K[level] << fx[level], 0.0, cx[level], 0.0, fy[level], cy[level], 0.0, 0.0, 1.0;
-            Ki[level] = K[level].inverse();
-            fxi[level] = Ki[level](0, 0);
-            fyi[level] = Ki[level](1, 1);
-            cxi[level] = Ki[level](0, 2);
-            cyi[level] = Ki[level](1, 2);
+        for (int level = 0; level < pyrlevelsused; ++level) {
+            k[level] << fx[level], 0.0, cx[level], 0.0, fy[level], cy[level], 0.0, 0.0, 1.0;
+            ki[level] = k[level].inverse();
+            fxi[level] = ki[level](0, 0);
+            fyi[level] = ki[level](1, 1);
+            cxi[level] = ki[level](0, 2);
+            cyi[level] = ki[level](1, 2);
         }
     }
 
-    void CoarseInitializer::makeNN() {
-        const float NNDistFactor = 0.05;
+    void coarseinitializer::makenn() {
+        const float nndistfactor = 0.05;
 
-        typedef nanoflann::KDTreeSingleIndexAdaptor<
-                nanoflann::L2_Simple_Adaptor<float, FLANNPointcloud>,
-                FLANNPointcloud, 2> KDTree;
+        typedef nanoflann::kdtreesingleindexadaptor<
+                nanoflann::l2_simple_adaptor<float, flannpointcloud>,
+                flannpointcloud, 2> kdtree;
 
         // build indices
-        FLANNPointcloud pcs[PYR_LEVELS];
-        KDTree *indexes[PYR_LEVELS];
-        for (int i = 0; i < pyrLevelsUsed; i++) {
-            pcs[i] = FLANNPointcloud(numPoints[i], points[i]);
-            indexes[i] = new KDTree(2, pcs[i], nanoflann::KDTreeSingleIndexAdaptorParams(5));
-            indexes[i]->buildIndex();
+        flannpointcloud pcs[pyr_levels];
+        kdtree *indexes[pyr_levels];
+        for (int i = 0; i < pyrlevelsused; i++) {
+            pcs[i] = flannpointcloud(numpoints[i], points[i]);
+            indexes[i] = new kdtree(2, pcs[i], nanoflann::kdtreesingleindexadaptorparams(5));
+            indexes[i]->buildindex();
         }
 
         const int nn = 10;
 
-        // find NN & parents
-        for (int lvl = 0; lvl < pyrLevelsUsed; lvl++) {
-            Pnt *pts = points[lvl];
-            int npts = numPoints[lvl];
+        // find nn & parents
+        for (int lvl = 0; lvl < pyrlevelsused; lvl++) {
+            pnt *pts = points[lvl];
+            int npts = numpoints[lvl];
 
             int ret_index[nn];
             float ret_dist[nn];
-            nanoflann::KNNResultSet<float, int, int> resultSet(nn);
-            nanoflann::KNNResultSet<float, int, int> resultSet1(1);
+            nanoflann::knnresultset<float, int, int> resultset(nn);
+            nanoflann::knnresultset<float, int, int> resultset1(1);
 
             for (int i = 0; i < npts; i++) {
-                //resultSet.init(pts[i].neighbours, pts[i].neighboursDist );
-                resultSet.init(ret_index, ret_dist);
-                Vec2f pt = Vec2f(pts[i].u, pts[i].v);
-                indexes[lvl]->findNeighbors(resultSet, (float *) &pt, nanoflann::SearchParams());
+                //resultset.init(pts[i].neighbours, pts[i].neighboursdist );
+                // 在同层找前十个邻居点
+                resultset.init(ret_index, ret_dist);
+                vec2f pt = vec2f(pts[i].u, pts[i].v);
+                indexes[lvl]->findneighbors(resultset, (float *) &pt, nanoflann::searchparams());
                 int myidx = 0;
-                float sumDF = 0;
+                float sumdf = 0;
                 for (int k = 0; k < nn; k++) {
                     pts[i].neighbours[myidx] = ret_index[k];
-                    float df = expf(-ret_dist[k] * NNDistFactor);
-                    sumDF += df;
-                    pts[i].neighboursDist[myidx] = df;
+                    float df = expf(-ret_dist[k] * nndistfactor);
+                    sumdf += df;
+                    pts[i].neighboursdist[myidx] = df;
                     assert(ret_index[k] >= 0 && ret_index[k] < npts);
                     myidx++;
                 }
                 for (int k = 0; k < nn; k++)
-                    pts[i].neighboursDist[k] *= 10 / sumDF;
+                    pts[i].neighboursdist[k] *= 10 / sumdf;
 
-
-                if (lvl < pyrLevelsUsed - 1) {
-                    resultSet1.init(ret_index, ret_dist);
-                    pt = pt * 0.5f - Vec2f(0.25f, 0.25f);
-                    indexes[lvl + 1]->findNeighbors(resultSet1, (float *) &pt, nanoflann::SearchParams());
+                // 向上找最近邻点
+                if (lvl < pyrlevelsused - 1) {
+                    resultset1.init(ret_index, ret_dist);
+                    pt = pt * 0.5f - vec2f(0.25f, 0.25f);
+                    indexes[lvl + 1]->findneighbors(resultset1, (float *) &pt, nanoflann::searchparams());
 
                     pts[i].parent = ret_index[0];
-                    pts[i].parentDist = expf(-ret_dist[0] * NNDistFactor);
+                    pts[i].parentdist = expf(-ret_dist[0] * nndistfactor);
 
-                    assert(ret_index[0] >= 0 && ret_index[0] < numPoints[lvl + 1]);
+                    assert(ret_index[0] >= 0 && ret_index[0] < numpoints[lvl + 1]);
                 } else {
                     pts[i].parent = -1;
-                    pts[i].parentDist = -1;
+                    pts[i].parentdist = -1;
                 }
             }
         }
         // done.
 
-        for (int i = 0; i < pyrLevelsUsed; i++)
+        for (int i = 0; i < pyrlevelsused; i++)
             delete indexes[i];
     }
 }

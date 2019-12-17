@@ -73,13 +73,17 @@ namespace ldso {
         LOG(INFO) << "*** taking frame " << id << " ***" << endl;
 
         // create frame and frame hessian
+        // 创建一个Frame
         shared_ptr<Frame> frame(new Frame(image->timestamp));
+        // 创建FrameHessian
         frame->CreateFH(frame);
         allFrameHistory.push_back(frame);
 
         // ==== make images ==== //
+        // 
         shared_ptr<FrameHessian> fh = frame->frameHessian;
         fh->ab_exposure = image->exposure_time;
+        // 建立金字塔，同时计算梯度，不过没有用Gaussian模糊啥的
         fh->makeImages(image->image, Hcalib->mpCH);
 
         if (!initialized) {

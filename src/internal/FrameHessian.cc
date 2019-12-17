@@ -41,6 +41,7 @@ namespace ldso {
             nullspaces_affine.topRightCorner<2, 1>() = Vec2(0, expf(aff_g2l_0().a) * ab_exposure);
         }
 
+        // 这个函数应该是制作金字塔，同时把梯度准备好
         void FrameHessian::makeImages(float *color, const shared_ptr<CalibHessian> &HCalib) {
 
             for (int i = 0; i < pyrLevelsUsed; i++) {
@@ -49,12 +50,15 @@ namespace ldso {
                 memset(absSquaredGrad[i], 0, wG[i] * hG[i]);
                 memset(dIp[i], 0, 3 * wG[i] * hG[i]);
             }
+            // dI是个Vec3f的指针
             dI = dIp[0];
 
             // make d0
+            // 第0层金字塔
             int w = wG[0];
             int h = hG[0];
             for (int i = 0; i < w * h; i++) {
+                // 0通道存放图像
                 dI[i][0] = color[i];
             }
 
@@ -68,7 +72,7 @@ namespace ldso {
                     int wlm1 = wG[lvlm1];
                     Eigen::Vector3f *dI_lm = dIp[lvlm1];
 
-
+                    // 如果不是第0层，先获取相应的图像
                     for (int y = 0; y < hl; y++)
                         for (int x = 0; x < wl; x++) {
                             dI_l[x + y * wl][0] = 0.25f * (dI_lm[2 * x + 2 * y * wlm1][0] +
@@ -78,6 +82,7 @@ namespace ldso {
                         }
                 }
 
+                // 计算当前层的x y方向的梯度
                 for (int idx = wl; idx < wl * (hl - 1); idx++) {
                     float dx = 0.5f * (dI_l[idx + 1][0] - dI_l[idx - 1][0]);
                     float dy = 0.5f * (dI_l[idx + wl][0] - dI_l[idx - wl][0]);
@@ -85,11 +90,14 @@ namespace ldso {
                     if (std::isnan(dx) || std::fabs(dx) > 255.0) dx = 0;
                     if (std::isnan(dy) || std::fabs(dy) > 255.0) dy = 0;
 
+                    // 存储
                     dI_l[idx][1] = dx;
                     dI_l[idx][2] = dy;
 
+                    // 计算梯度的大小
                     dabs_l[idx] = dx * dx + dy * dy;
 
+                    // TODO: wuch 有空回来补上
                     if (setting_gammaWeightsPixelSelect == 1 && HCalib != 0) {
                         float gw = HCalib->getBGradOnly((float) (dI_l[idx][0]));
                         dabs_l[idx] *=

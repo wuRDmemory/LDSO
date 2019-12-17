@@ -4,9 +4,7 @@
 #include "frontend/PixelSelector2.h"
 #include "frontend/CoarseInitializer.h"
 #include "frontend/nanoflann.h"
-
 #include <iostream>
-
 
 namespace ldso {
 
@@ -70,11 +68,11 @@ namespace ldso {
             refToNew_aff_current = AffLight(logf(newFrame->ab_exposure / firstFrame->ab_exposure),
                                             0); // coarse approximation.
 
-
+        // 从金字塔顶层到底层
         Vec3f latestRes = Vec3f::Zero();
         for (int lvl = pyrLevelsUsed - 1; lvl >= 0; lvl--) {
 
-
+            // 当金字塔不在最顶层的时候，进行向下传播
             if (lvl < pyrLevelsUsed - 1)
                 // 如果不在金字塔的顶层，则进行参数的向下传播
                 propagateDown(lvl + 1);
@@ -94,17 +92,20 @@ namespace ldso {
             float eps = 1e-4;
             int fails = 0;
 
+            // L-M 方法
             int iteration = 0;
             while (true) {
                 Mat88f Hl = H;
                 for (int i = 0; i < 8; i++) Hl(i, i) *= (1 + lambda);
+
+                // schur补
                 Hl -= Hsc * (1 / (1 + lambda));
                 Vec8f bl = b - bsc * (1 / (1 + lambda));
 
                 Hl = wM * Hl * wM * (0.01f / (w[lvl] * h[lvl]));
                 bl = wM * bl * (0.01f / (w[lvl] * h[lvl]));
 
-
+                // 
                 Vec8f inc;
                 if (fixAffine) {
                     inc.head<6>() = -(wM.toDenseMatrix().topLeftCorner<6, 6>() *
@@ -118,11 +119,14 @@ namespace ldso {
                 AffLight refToNew_aff_new = refToNew_aff_current;
                 refToNew_aff_new.a += inc[6];
                 refToNew_aff_new.b += inc[7];
+                // 计算新的逆深度
                 doStep(lvl, lambda, inc);
 
 
                 Mat88f H_new, Hsc_new;
                 Vec8f b_new, bsc_new;
+
+                // 
                 Vec3f resNew = calcResAndGS(lvl, H_new, b_new, Hsc_new, bsc_new, refToNew_new, refToNew_aff_new, false);
                 Vec3f regEnergy = calcEC(lvl);
 
@@ -206,18 +210,22 @@ namespace ldso {
         float cyl = cy[lvl];
 
         Accumulator11 E;
+        // acc9 包含 H b
         acc9.initialize();
+        // E 包含一个 A(float) 
         E.initialize();
 
 
-        int npts = numPoints[lvl];
+        int npts  = numPoints[lvl];
         Pnt *ptsl = points[lvl];
         for (int i = 0; i < npts; i++) {
 
             Pnt *point = ptsl + i;
 
             point->maxstep = 1e10;
+            // 如果该特征点不是good
             if (!point->isGood) {
+                // 这个地方加的0
                 E.updateSingle((float) (point->energy[0]));
                 point->energy_new = point->energy;
                 point->isGood_new = false;
@@ -243,12 +251,16 @@ namespace ldso {
                 int dx = patternP[idx][0];
                 int dy = patternP[idx][1];
 
-
+                // 这边公式用的是齐次的公式，也就是Pc=K*T*Pw, Pw=[x y 1 \rho]^T
                 Vec3f pt = RKi * Vec3f(point->u + dx, point->v + dy, 1) + t * point->idepth_new;
+
+                // 投影到当前帧
                 float u = pt[0] / pt[2];
                 float v = pt[1] / pt[2];
                 float Ku = fxl * u + cxl;
                 float Kv = fyl * v + cyl;
+
+                // 中间变量
                 float new_idepth = point->idepth_new / pt[2];
 
                 if (!(Ku > 1 && Kv > 1 && Ku < wl - 2 && Kv < hl - 2 && new_idepth > 0)) {
@@ -256,10 +268,13 @@ namespace ldso {
                     break;
                 }
 
+                // 得到插值后的值
+                // hitColor是一个vector3f，[0]：gray value，[1]: gradientX，[2]: gradientY
                 Vec3f hitColor = getInterpolatedElement33(colorNew, Ku, Kv, wl);
                 //Vec3f hitColor = getInterpolatedElement33BiCub(colorNew, Ku, Kv, wl);
 
                 //float rlR = colorRef[point->u+dx + (point->v+dy) * wl][0];
+                // 得到插值之后的灰度值
                 float rlR = getInterpolatedElement31(colorRef, point->u + dx, point->v + dy, wl);
 
                 if (!std::isfinite(rlR) || !std::isfinite((float) hitColor[0])) {
@@ -267,33 +282,44 @@ namespace ldso {
                     break;
                 }
 
-
+                // 得到光度误差，有huber函数
                 float residual = hitColor[0] - r2new_aff[0] * rlR - r2new_aff[1];
                 float hw = fabs(residual) < setting_huberTH ? 1 : setting_huberTH / fabs(residual);
                 energy += hw * residual * residual * (2 - hw);
 
-
+                // 中间变量，为雅可比做准备，主要针对深度的jacobian
                 float dxdd = (t[0] - t[2] * u) / pt[2];
                 float dydd = (t[1] - t[2] * v) / pt[2];
 
                 if (hw < 1) hw = sqrtf(hw);
                 float dxInterp = hw * hitColor[1] * fxl;
                 float dyInterp = hw * hitColor[2] * fyl;
+
+                // 0-5是6FOD(位姿) 
                 dp0[idx] = new_idepth * dxInterp;
                 dp1[idx] = new_idepth * dyInterp;
                 dp2[idx] = -new_idepth * (u * dxInterp + v * dyInterp);
                 dp3[idx] = -u * v * dxInterp - (1 + v * v) * dyInterp;
                 dp4[idx] = (1 + u * u) * dxInterp + u * v * dyInterp;
                 dp5[idx] = -v * dxInterp + u * dyInterp;
+
+                // 对光度系数a b进行求导
                 dp6[idx] = -hw * r2new_aff[0] * rlR;
                 dp7[idx] = -hw * 1;
+
+                // 逆深度的求导
                 dd[idx] = dxInterp * dxdd + dyInterp * dydd;
+
+                // insentity error
                 r[idx] = hw * residual;
 
                 float maxstep = 1.0f / Vec2f(dxdd * fxl, dydd * fyl).norm();
                 if (maxstep < point->maxstep) point->maxstep = maxstep;
 
                 // immediately compute dp*dd' and dd*dd' in JbBuffer1.
+                // H = J^T*J, shape(J)=1*10
+                // 因为要把逆深度merge掉用于加速计算，因此这里算的其实是W阵
+                // 这里要merge掉深度值
                 JbBuffer_new[i][0] += dp0[idx] * dd[idx];
                 JbBuffer_new[i][1] += dp1[idx] * dd[idx];
                 JbBuffer_new[i][2] += dp2[idx] * dd[idx];
@@ -302,10 +328,16 @@ namespace ldso {
                 JbBuffer_new[i][5] += dp5[idx] * dd[idx];
                 JbBuffer_new[i][6] += dp6[idx] * dd[idx];
                 JbBuffer_new[i][7] += dp7[idx] * dd[idx];
+
+                // Jb part
                 JbBuffer_new[i][8] += r[idx] * dd[idx];
+                
+                // Hv part
                 JbBuffer_new[i][9] += dd[idx] * dd[idx];
             }
 
+            // 如果经过pattern运算之后判断出该点不好
+            // 或者光度差太大了，应该是怕这个点主导了整个迭代的方向
             if (!isGood || energy > point->outlierTH * 20) {
                 E.updateSingle((float) (point->energy[0]));
                 point->isGood_new = false;
@@ -320,6 +352,8 @@ namespace ldso {
             point->energy_new[0] = energy;
 
             // update Hessian matrix.
+            // 使用SSE一次处理4个数据
+            // 构建Hu矩阵，就是不被merge的部分
             for (int i = 0; i + 3 < patternNum; i += 4)
                 acc9.updateSSE(
                         _mm_load_ps(((float *) (&dp0)) + i),
@@ -332,7 +366,7 @@ namespace ldso {
                         _mm_load_ps(((float *) (&dp7)) + i),
                         _mm_load_ps(((float *) (&r)) + i));
 
-
+            // 处理剩下的数据，因为pattern有时候是奇数
             for (int i = ((patternNum >> 2) << 2); i < patternNum; i++)
                 acc9.updateSingle(
                         (float) dp0[i], (float) dp1[i], (float) dp2[i], (float) dp3[i],
@@ -342,6 +376,7 @@ namespace ldso {
 
         }
 
+        // 构建完整的H矩阵
         E.finish();
         acc9.finish();
 
@@ -508,6 +543,9 @@ namespace ldso {
         assert(srcLvl > 0);
         // set idepth of target
 
+        // numPoints表示每层有多少特征点
+        // ptss表示当前层的上一层
+        // ptst表示当前层
         int nptst = numPoints[srcLvl - 1];
         Pnt *ptss = points[srcLvl];
         Pnt *ptst = points[srcLvl - 1];
@@ -554,7 +592,7 @@ namespace ldso {
     }
 
     void CoarseInitializer::setFirst(shared_ptr<CalibHessian> HCalib, shared_ptr<FrameHessian> newFrameHessian) {
-
+        // 生成金字塔下图像的K矩阵
         makeK(HCalib);
         firstFrame = newFrameHessian;
 
@@ -563,24 +601,29 @@ namespace ldso {
         float *statusMap = new float[w[0] * h[0]];
         bool *statusMapB = new bool[w[0] * h[0]];
 
-        float densities[] = {0.03, 0.05, 0.15, 0.5, 1};
+        float densities[] = {0.03, 0.05, 0.15, 0.5, 1}; // 9216  15360 64080
         for (int lvl = 0; lvl < pyrLevelsUsed; lvl++) {
             sel.currentPotential = 3;
             int npts;
             if (lvl == 0) {
-                npts = sel.makeMaps(firstFrame, statusMap, densities[lvl] * w[0] * h[0], 1, false, 2);
+                /// 金字塔第0层，640*480的图像大概取9000+个点
+                /// statusMap表示每个像素的状态，为0表示没有点，1 2 4表示金字塔的层数
+                npts = sel.makeMaps(firstFrame, statusMap, densities[lvl] * w[0] * h[0], 1, false, 2); 
             } else {
+                /// 其他层，
                 npts = makePixelStatus(firstFrame->dIp[lvl], statusMapB, w[lvl], h[lvl], densities[lvl] * w[0] * h[0]);
             }
 
             if (points[lvl] != 0) delete[] points[lvl];
+            // 存储所有点的信息
             points[lvl] = new Pnt[npts];
 
             // set idepth map to initially 1 everywhere.
-            int wl = w[lvl], hl = h[lvl];
+            int  wl = w[lvl], hl = h[lvl];
             Pnt *pl = points[lvl];
-            int nl = 0;
-            for (int y = patternPadding + 1; y < hl - patternPadding - 2; y++)
+            int  nl = 0;
+            // 对每个点进行遍历
+            for (int y = patternPadding + 1; y < hl - patternPadding - 2; y++) {
                 for (int x = patternPadding + 1; x < wl - patternPadding - 2; x++) {
                     if ((lvl != 0 && statusMapB[x + y * wl]) || (lvl == 0 && statusMap[x + y * wl] != 0)) {
                         //assert(patternNum==9);
@@ -588,14 +631,16 @@ namespace ldso {
                         pl[nl].v = y + 0.1;
                         pl[nl].idepth = 1;
                         pl[nl].iR = 1;
-                        pl[nl].isGood = true;
-                        pl[nl].energy.setZero();
+                        pl[nl].isGood = true;    // 第一次找到的点认为是good的
+                        pl[nl].energy.setZero(); // Vector2f
                         pl[nl].lastHessian = 0;
                         pl[nl].lastHessian_new = 0;
                         pl[nl].my_type = (lvl != 0) ? 1 : statusMap[x + y * wl];
 
                         Eigen::Vector3f *cpt = firstFrame->dIp[lvl] + x + y * w[lvl];
                         float sumGrad2 = 0;
+                        // patternNum = 8, SSE pattern
+                        // 不知道这块是在干啥
                         for (int idx = 0; idx < patternNum; idx++) {
                             int dx = patternP[idx][0];
                             int dy = patternP[idx][1];
@@ -609,13 +654,14 @@ namespace ldso {
                         assert(nl <= npts);
                     }
                 }
-
+            }
 
             numPoints[lvl] = nl;
         }
         delete[] statusMap;
         delete[] statusMapB;
 
+        // 应该是在，构成KD树
         makeNN();
 
         thisToNext = SE3();
@@ -634,8 +680,10 @@ namespace ldso {
             pts[i].energy.setzero();
             pts[i].idepth_new = pts[i].idepth;
 
-
-            if (lvl == pyrlevelsused - 1 && !pts[i].isgood) {
+            // 如果特征点位于顶层且不是good的话，看一下他的邻居怎么样
+            // 如果邻居点不错的话，可以用邻居点的深度来代替
+            // 自然，邻居点不能离该特征点太远
+            if (lvl == pyrLevelsUsed - 1 && !pts[i].isGood) {
                 float snd = 0, sn = 0;
                 for (int n = 0; n < 10; n++) {
                     // 看一下相邻点的good比例
@@ -741,6 +789,7 @@ namespace ldso {
             indexes[i]->buildindex();
         }
 
+        // 找10个邻居
         const int nn = 10;
 
         // find nn & parents
@@ -760,7 +809,8 @@ namespace ldso {
                 vec2f pt = vec2f(pts[i].u, pts[i].v);
                 indexes[lvl]->findneighbors(resultset, (float *) &pt, nanoflann::searchparams());
                 int myidx = 0;
-                float sumdf = 0;
+                float sumDF = 0;
+                // 设置nn个邻居，
                 for (int k = 0; k < nn; k++) {
                     pts[i].neighbours[myidx] = ret_index[k];
                     float df = expf(-ret_dist[k] * nndistfactor);
@@ -772,11 +822,10 @@ namespace ldso {
                 for (int k = 0; k < nn; k++)
                     pts[i].neighboursdist[k] *= 10 / sumdf;
 
-                // 向上找最近邻点
-                if (lvl < pyrlevelsused - 1) {
-                    resultset1.init(ret_index, ret_dist);
-                    pt = pt * 0.5f - vec2f(0.25f, 0.25f);
-                    indexes[lvl + 1]->findneighbors(resultset1, (float *) &pt, nanoflann::searchparams());
+                if (lvl < pyrLevelsUsed - 1) {
+                    resultSet1.init(ret_index, ret_dist);
+                    pt = pt * 0.5f - Vec2f(0.25f, 0.25f);
+                    indexes[lvl + 1]->findNeighbors(resultSet1, (float *) &pt, nanoflann::SearchParams());
 
                     pts[i].parent = ret_index[0];
                     pts[i].parentdist = expf(-ret_dist[0] * nndistfactor);
@@ -793,4 +842,3 @@ namespace ldso {
         for (int i = 0; i < pyrlevelsused; i++)
             delete indexes[i];
     }
-}

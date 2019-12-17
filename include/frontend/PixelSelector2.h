@@ -66,6 +66,7 @@ namespace ldso {
         memset(map_out, 0, sizeof(bool) * w * h);
 
         int numGood = 0;
+        // 块遍历
         for (int y = 1; y < h - pot; y += pot) {
             for (int x = 1; x < w - pot; x += pot) {
                 int bestXXID = -1;
@@ -76,32 +77,35 @@ namespace ldso {
                 float bestXX = 0, bestYY = 0, bestXY = 0, bestYX = 0;
 
                 Eigen::Vector3f *grads0 = grads + x + y * w;
-                for (int dx = 0; dx < pot; dx++)
+                // 
+                for (int dx = 0; dx < pot; dx++) {
                     for (int dy = 0; dy < pot; dy++) {
                         int idx = dx + dy * w;
                         Eigen::Vector3f g = grads0[idx];
                         float sqgd = g.tail<2>().squaredNorm();
                         float TH = THFac * minUseGrad_pixsel * (0.75f);
 
+                        // 如果梯度的模长大于阈值
                         if (sqgd > TH * TH) {
+                            // 找x方向最好的
                             float agx = fabs((float) g[1]);
                             if (agx > bestXX) {
                                 bestXX = agx;
                                 bestXXID = idx;
                             }
-
+                            // 找y方向最好的
                             float agy = fabs((float) g[2]);
                             if (agy > bestYY) {
                                 bestYY = agy;
                                 bestYYID = idx;
                             }
-
+                            // 找xy方向最好的
                             float gxpy = fabs((float) (g[1] - g[2]));
                             if (gxpy > bestXY) {
                                 bestXY = gxpy;
                                 bestXYID = idx;
                             }
-
+                            // 找yx方向最好的
                             float gxmy = fabs((float) (g[1] + g[2]));
                             if (gxmy > bestYX) {
                                 bestYX = gxmy;
@@ -109,6 +113,7 @@ namespace ldso {
                             }
                         }
                     }
+                }
 
                 bool *map0 = map_out + x + y * w;
 
@@ -116,25 +121,21 @@ namespace ldso {
                     if (!map0[bestXXID])
                         numGood++;
                     map0[bestXXID] = true;
-
                 }
                 if (bestYYID >= 0) {
                     if (!map0[bestYYID])
                         numGood++;
                     map0[bestYYID] = true;
-
                 }
                 if (bestXYID >= 0) {
                     if (!map0[bestXYID])
                         numGood++;
                     map0[bestXYID] = true;
-
                 }
                 if (bestYXID >= 0) {
                     if (!map0[bestYXID])
                         numGood++;
                     map0[bestYXID] = true;
-
                 }
             }
         }
@@ -227,10 +228,10 @@ namespace ldso {
 
     inline int makePixelStatus(Eigen::Vector3f *grads, bool *map, int w, int h, float desiredDensity, int recsLeft = 5,
                                float THFac = 1) {
+        // sparsityFactor = 5(default)
         if (sparsityFactor < 1) sparsityFactor = 1;
 
         int numGoodPoints;
-
 
         if (sparsityFactor == 1) numGoodPoints = gridMaxSelection<1>(grads, map, w, h, THFac);
         else if (sparsityFactor == 2) numGoodPoints = gridMaxSelection<2>(grads, map, w, h, THFac);

@@ -44,26 +44,32 @@ namespace ldso {
         int h32 = h / 32;
         thsStep = w32;
 
+        // 将整个图分为n×n块
         for (int y = 0; y < h32; y++)
             for (int x = 0; x < w32; x++) {
                 float *map0 = mapmax0 + 32 * x + 32 * y * w;
-                int *hist0 = gradHist;// + 50*(x+y*w32);
+                int  *hist0 = gradHist;// + 50*(x+y*w32);
                 memset(hist0, 0, sizeof(int) * 50);
 
                 for (int j = 0; j < 32; j++)
                     for (int i = 0; i < 32; i++) {
                         int it = i + 32 * x;
                         int jt = j + 32 * y;
+                        // 检查边界，这个边界，似乎有点儿太窄了
                         if (it > w - 2 || jt > h - 2 || it < 1 || jt < 1) continue;
+                        // 查看梯度的强度
                         int g = sqrtf(map0[i + j * w]);
                         if (g > 48) g = 48;
                         hist0[g + 1]++;
                         hist0[0]++;
                     }
 
+                // setting_minGradHistCut = 0.5
+                // setting_minGradHistAdd = 7
                 ths[x + y * w32] = computeHistQuantil(hist0, setting_minGradHistCut) + setting_minGradHistAdd;
             }
 
+        // 对于每一个网格，取九宫格的阈值累加之后做平均，获取到当前网格强度的阈值
         for (int y = 0; y < h32; y++)
             for (int x = 0; x < w32; x++) {
                 float sum = 0, num = 0;
@@ -114,11 +120,17 @@ namespace ldso {
         float numHave = 0;
         float numWant = density;
         float quotia;
+        // currentPotential = 3
+        // 表示要在currentPotential×currentPotential的块内提取一个点
         int idealPotential = currentPotential;
 
-        if (fh != gradHistFrame) makeHists(fh);
+        // 筛选每个栅格的阈值
+        if (fh != gradHistFrame) 
+            makeHists(fh); 
 
         // select!
+        // 提取特征点
+        // 遍历第0层的每个像素点，结合金字塔来确定该点是不是一个角点
         Eigen::Vector3i n = this->select(fh, map_out, currentPotential, thFactor);
 
         // sub-select!
@@ -133,13 +145,16 @@ namespace ldso {
         if (recursionsLeft > 0 && quotia > 1.25 && currentPotential > 1) {
             // re-sample to get more points!
             // potential needs to be smaller
+            // 得到的点比较少，减小每个块的大小，重新找一遍
             if (idealPotential >= currentPotential)
                 idealPotential = currentPotential - 1;
 
             currentPotential = idealPotential;
+            // 这次找就不要在进行递归了
             return makeMaps(fh, map_out, density, recursionsLeft - 1, plot, thFactor);
         } else if (recursionsLeft > 0 && quotia < 0.25) {
             // re-sample to get less points!
+            // 如果拿到的点太多了，就把块给加大
             if (idealPotential <= currentPotential)
                 idealPotential = currentPotential + 1;
             currentPotential = idealPotential;
@@ -147,6 +162,7 @@ namespace ldso {
         }
 
         int numHaveSub = numHave;
+        // 如果得到的比预期的要多5%，则随机的删除一些
         if (quotia < 0.95) {
             int wh = wG[0] * hG[0];
             int rn = 0;
@@ -175,45 +191,45 @@ namespace ldso {
         float *mapmax1 = fh->absSquaredGrad[1];
         float *mapmax2 = fh->absSquaredGrad[2];
 
-
-        int w = wG[0];
+        int w  = wG[0];
         int w1 = wG[1];
         int w2 = wG[2];
-        int h = hG[0];
-
+        int h  = hG[0];
 
         const Vec2f directions[16] = {
-                Vec2f(0, 1.0000),
-                Vec2f(0.3827, 0.9239),
-                Vec2f(0.1951, 0.9808),
-                Vec2f(0.9239, 0.3827),
-                Vec2f(0.7071, 0.7071),
-                Vec2f(0.3827, -0.9239),
-                Vec2f(0.8315, 0.5556),
-                Vec2f(0.8315, -0.5556),
-                Vec2f(0.5556, -0.8315),
-                Vec2f(0.9808, 0.1951),
-                Vec2f(0.9239, -0.3827),
-                Vec2f(0.7071, -0.7071),
-                Vec2f(0.5556, 0.8315),
-                Vec2f(0.9808, -0.1951),
-                Vec2f(1.0000, 0.0000),
-                Vec2f(0.1951, -0.9808)};
+                Vec2f(0, 1.0000),           //  90.0
+                Vec2f(0.3827, 0.9239),      //  67.5
+                Vec2f(0.1951, 0.9808),      //  78.7
+                Vec2f(0.9239, 0.3827),      //  22.5
+                Vec2f(0.7071, 0.7071),      //  45.0
+                Vec2f(0.3827, -0.9239),     // -67.5
+                Vec2f(0.8315, 0.5556),      //  33.8
+                Vec2f(0.8315, -0.5556),     // -33.8
+                Vec2f(0.5556, -0.8315),     // -56.2
+                Vec2f(0.9808, 0.1951),      //  11.3
+                Vec2f(0.9239, -0.3827),     // -22.5
+                Vec2f(0.7071, -0.7071),     // -45.0
+                Vec2f(0.5556, 0.8315),      //  36.2
+                Vec2f(0.9808, -0.1951),     // -11.3
+                Vec2f(1.0000, 0.0000),      //   0.0
+                Vec2f(0.1951, -0.9808)};    // -67.5
 
         memset(map_out, 0, w * h * sizeof(PixelSelectorStatus));
 
+        // setting_gradDownweightPerLevel = 0.75
         float dw1 = setting_gradDownweightPerLevel;
         float dw2 = dw1 * dw1;
 
         int n3 = 0, n2 = 0, n4 = 0;
-        for (int y4 = 0; y4 < h; y4 += (4 * pot))
+        // 对
+        for (int y4 = 0; y4 < h; y4 += (4 * pot)) {
             for (int x4 = 0; x4 < w; x4 += (4 * pot)) {
                 int my3 = std::min((4 * pot), h - y4);
                 int mx3 = std::min((4 * pot), w - x4);
                 int bestIdx4 = -1;
                 float bestVal4 = 0;
                 Vec2f dir4 = directions[randomPattern[n2] & 0xF];
-                for (int y3 = 0; y3 < my3; y3 += (2 * pot))
+                for (int y3 = 0; y3 < my3; y3 += (2 * pot)) {
                     for (int x3 = 0; x3 < mx3; x3 += (2 * pot)) {
                         int x34 = x3 + x4;
                         int y34 = y3 + y4;
@@ -222,7 +238,7 @@ namespace ldso {
                         int bestIdx3 = -1;
                         float bestVal3 = 0;
                         Vec2f dir3 = directions[randomPattern[n2] & 0xF];
-                        for (int y2 = 0; y2 < my2; y2 += pot)
+                        for (int y2 = 0; y2 < my2; y2 += pot) {
                             for (int x2 = 0; x2 < mx2; x2 += pot) {
                                 int x234 = x2 + x34;
                                 int y234 = y2 + y34;
@@ -231,7 +247,8 @@ namespace ldso {
                                 int bestIdx2 = -1;
                                 float bestVal2 = 0;
                                 Vec2f dir2 = directions[randomPattern[n2] & 0xF];
-                                for (int y1 = 0; y1 < my1; y1 += 1)
+                                // 对 pot×pot 像素进行判断
+                                for (int y1 = 0; y1 < my1; y1 += 1) {
                                     for (int x1 = 0; x1 < mx1; x1 += 1) {
                                         assert(x1 + x234 < w);
                                         assert(y1 + y234 < h);
@@ -241,18 +258,19 @@ namespace ldso {
 
                                         if (xf < 4 || xf >= w - 5 || yf < 4 || yf > h - 4) continue;
 
-
                                         float pixelTH0 = thsSmoothed[(xf >> 5) + (yf >> 5) * thsStep];
                                         float pixelTH1 = pixelTH0 * dw1;
                                         float pixelTH2 = pixelTH1 * dw2;
 
-
                                         float ag0 = mapmax0[idx];
                                         if (ag0 > pixelTH0 * thFactor) {
-                                            Vec2f ag0d = map0[idx].tail<2>();
+                                            // ag0d: 金字塔第0层的xy梯度
+                                            Vec2f ag0d    = map0[idx].tail<2>();
+                                            // 梯度在当前dir2方向上的投影长度
                                             float dirNorm = fabsf((float) (ag0d.dot(dir2)));
                                             if (!setting_selectDirectionDistribution) dirNorm = ag0;
 
+                                            // 找到了比较好的
                                             if (dirNorm > bestVal2) {
                                                 bestVal2 = dirNorm;
                                                 bestIdx2 = idx;
@@ -289,27 +307,34 @@ namespace ldso {
                                             }
                                         }
                                     }
+                                }
 
+                                // 如果在金字塔第0层找到了好的点，下个块就对另一个方向进行探索
                                 if (bestIdx2 > 0) {
                                     map_out[bestIdx2] = 1;
+                                    // 如果0层找到了点，那么第1层就不找了，第2层呢？
                                     bestVal3 = 1e10;
                                     n2++;
                                 }
                             }
+                        }
 
+                        // 如果在第1层找到了好的点，前提是0层没有找到好的点
                         if (bestIdx3 > 0) {
                             map_out[bestIdx3] = 2;
                             bestVal4 = 1e10;
                             n3++;
                         }
                     }
+                }
 
+                // 如果在第2层找到了好的点，前提是0,1层都没有找到好的点
                 if (bestIdx4 > 0) {
                     map_out[bestIdx4] = 4;
                     n4++;
                 }
             }
-
+        }
 
         return Eigen::Vector3i(n2, n3, n4);
     }

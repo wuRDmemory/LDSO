@@ -19,4 +19,5 @@ evaluation/matlab-evaluation/**/*.mat
 /pointcloud.ply
 
 # python
-**.pyc
+*.pyc
+.vscode/

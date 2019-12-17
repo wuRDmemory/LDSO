@@ -34,7 +34,7 @@ namespace ldso {
         float idepth_new;
         Vec2f energy_new;
 
-        float iR;
+        float iR;                       // what's this? irradiant?
         float iRSumNum;
 
         float lastHessian;
@@ -78,6 +78,7 @@ namespace ldso {
         bool fixAffine = true;
         bool printDebug = false;
 
+        // 每个金字塔看到的point
         Pnt *points[PYR_LEVELS];
         int numPoints[PYR_LEVELS];
         AffLight thisToNext_aff;
